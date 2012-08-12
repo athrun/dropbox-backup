@@ -126,7 +126,6 @@ def fetch_and_save_file (element):
     logging.info("Fetching [%s]" % path_on_fs)
     try:
         media = DBX_CLIENT.media (i_path)
-        #request = urllib2.Request (media["url"])
         content = urllib2.urlopen (media["url"])
         with open (path_on_fs, "wb") as f:
             shutil.copyfileobj (content, f)
@@ -223,17 +222,8 @@ def act_on_delta (delta):
             # Fetch and save file
             fetch_and_save_file (element)
 
-
-def print_metadata (path):
-    folder_metadata = DBX_CLIENT.metadata (path)
-    print "Dropbox content:", folder_metadata
-
 def main ():
-    #print_metadata ("/")
     setup_argparse ()
-    # Check content of ROOT_DIR
-    # Look for config file
-    #validate_root_dir (ROOT_DIR)
     initialize ()
 
     # Fetch new entries
