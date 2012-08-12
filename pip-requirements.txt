@@ -1,0 +1,1 @@
+https://www.dropbox.com/static/developers/dropbox-python-sdk-1.4.1.zip#egg=dropbox
