@@ -9,6 +9,7 @@ from dropbox import client, rest, session
 import sys, os, shutil, urlparse, urllib
 import argparse
 import logging
+import subprocess
 import ConfigParser
 
 logging.basicConfig(format='%(levelname)s:%(lineno)d:%(message)s', level=logging.INFO)
@@ -137,13 +138,15 @@ def fetch_and_save_file (element):
     path_on_fs = os.path.join (ROOT_DIR, path[1:])
     logging.info("Fetching [%s]" % path_on_fs)
     try:
-        media = DBX_CLIENT.media (i_path) 
+        media = DBX_CLIENT.media (i_path)
         (filename, headers) = urllib.urlretrieve (media["url"], reporthook=_dl_hook)
-        os.rename (filename, path_on_fs)
+        subprocess.check_call (["mv", filename, path_on_fs])
     except rest.ErrorResponse as de:
         logging.error ("%s: %s" % (type (de).__name__, de.message))
+        raise
     except Exception as e:
         logging.error ("%s: %s" % (type (e).__name__, e.message))
+        raise
 
 def get_delta ():
     cursor = CONFIG.get("CURSOR", None)
