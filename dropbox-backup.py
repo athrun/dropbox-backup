@@ -6,7 +6,7 @@ __version__ = "$Revision: 1.0 $"
 
 # Include the Dropbox SDK libraries
 from dropbox import client, rest, session
-import sys, os, shutil, urlparse, urllib2
+import sys, os, shutil, urlparse, urllib
 import argparse
 import logging
 import ConfigParser
@@ -119,16 +119,27 @@ def unlink_safe (path):
         return
     os.unlink (path)
 
+def _dl_hook (count, block_size, total_size):
+    """ Utility function to report the download status
+        on stdout.
+    """
+    p = ((100 * count) * block_size) / total_size
+    if p > 100:
+        p = 100
+    print '\r %3d %%' % p,
+    if p == 100:
+        print
+    sys.stdout.flush()
+
 def fetch_and_save_file (element):
     (i_path, metadata) = element
     path = metadata.get ("path") # to get case-sensitive path
     path_on_fs = os.path.join (ROOT_DIR, path[1:])
     logging.info("Fetching [%s]" % path_on_fs)
     try:
-        media = DBX_CLIENT.media (i_path)
-        content = urllib2.urlopen (media["url"])
-        with open (path_on_fs, "wb") as f:
-            shutil.copyfileobj (content, f)
+        media = DBX_CLIENT.media (i_path) 
+        (filename, headers) = urllib.urlretrieve (media["url"], reporthook=_dl_hook)
+        os.rename (filename, path_on_fs)
     except rest.ErrorResponse as de:
         logging.error ("%s: %s" % (type (de).__name__, de.message))
     except Exception as e:
