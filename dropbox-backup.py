@@ -6,6 +6,7 @@ __version__ = "$Revision: 1.0 $"
 
 # Include the Dropbox SDK libraries
 from dropbox import client, rest, session
+from dbclient import SyncStatusDB
 import sys, os, shutil, urlparse, urllib
 import argparse
 import logging
@@ -21,6 +22,7 @@ ROOT_DIR = ""
 CONFIG_FILE = "backup.cfg"
 
 DBX_CLIENT = None
+DBD_CLIENT = None
 
 def setup_argparse ():
     desc = """
@@ -55,10 +57,11 @@ def validate_root_dir (path):
         raise e
 
 def initialize ():
-    global DBX_CLIENT
+    global DBX_CLIENT, DBD_CLIENT
     sess = session.DropboxSession (CONFIG["APP_KEY"], CONFIG["APP_SECRET"], ACCESS_TYPE)
     sess = handle_oauth (sess)
-    DBX_CLIENT = client.DropboxClient(sess)
+    DBX_CLIENT = client.DropboxClient (sess)
+    DBD_CLIENT = SyncStatusDB (ROOT_DIR)
 
 def handle_oauth (sess):
     """ Retrieve OAUTH token & secret from config
@@ -136,11 +139,21 @@ def fetch_and_save_file (element):
     (i_path, metadata) = element
     path = metadata.get ("path") # to get case-sensitive path
     path_on_fs = os.path.join (ROOT_DIR, path[1:])
+
+    # Check that the file is already at the right rev
+    if os.path.isfile (path_on_fs) and \
+        DBD_CLIENT.get_file_entry (i_path).get ("rev") == metadata.get ("rev"):
+        logging.info ("File [%s] already on disk at revision [%s]. Skipping." \
+                            % (i_path, metadata.get ("rev")))
+        return
+
+    # Download and save file
     logging.info("Fetching [%s]" % path_on_fs)
     try:
         media = DBX_CLIENT.media (i_path)
         (filename, headers) = urllib.urlretrieve (media["url"], reporthook=_dl_hook)
         subprocess.check_call (["mv", filename, path_on_fs])
+        DBD_CLIENT.put_file_entry (i_path, metadata)
     except rest.ErrorResponse as de:
         logging.error ("%s: %s" % (type (de).__name__, de.message))
         raise
@@ -149,11 +162,11 @@ def fetch_and_save_file (element):
         raise
 
 def get_delta ():
-    cursor = CONFIG.get("CURSOR", None)
-    logging.info ("Getting Delta information")
+    cursor = DBD_CLIENT.get_cursor ()
+    logging.info ("Getting Delta information from Dropbox...")
     delta = DBX_CLIENT.delta (cursor=cursor)
     while delta.get ("has_more"):
-        logging.info ("Getting more delta information")
+        logging.info ("Getting more delta information from Dropbox")
         delta_plus = DBX_CLIENT.delta (delta.get ("cursor"))
         delta ["has_more"] = delta_plus.get ("has_more")
         delta ["entries"] += delta_plus.get ("entries", [])
@@ -164,8 +177,8 @@ def reset_root_dir ():
     """ Safely removes the content of ROOT_DIR, except for
         the config file.
     """
-    if os.path.exists (ROOT_DIR):
-        print "Removing content of %s - Yes/No?" % ROOT_DIR
+    if os.path.isdir (ROOT_DIR):
+        print "Removing content of [%s] - Yes/No?" % ROOT_DIR
         r = raw_input ("=> ")
         if r.lower () == 'yes':
             for element in os.listdir (ROOT_DIR):
@@ -181,10 +194,6 @@ def act_on_delta (delta):
     if delta.get ('reset'):
         reset_root_dir ()
 
-    if not os.path.exists (ROOT_DIR):
-        print "Creating dropbox root: %s" % ROOT_DIR
-        os.makedirs (ROOT_DIR)
-
     for element in delta.get ("entries"):
         # Go through all entries and deal with
         # them accordingly.
@@ -193,60 +202,69 @@ def act_on_delta (delta):
         if not metadata:
             # This path was deleted since last time
             # we should remove it.
-            logging.info ("Removing element %s", i_path)
-            path_on_fs = os.path.join (ROOT_DIR, i_path[1:])
-            if os.path.exists (path_on_fs):
-                logging.warning ("Removing %s" % path_on_fs)
-                if os.path.isdir (path_on_fs):
-                    logging.warning ("==> shutil.rmtree (path_on_fs)")
-                    rmtree_safe (path_on_fs)
-                else:
-                    logging.warning ("==> os.path.unlink (path_on_fs)")
-                    unlink_safe (path_on_fs)
+            logging.info ("Removing element [%s]." % i_path)
+            original_path = DBD_CLIENT.get_file_entry (i_path).get ("path")
+            if original_path:
+                path_on_fs = os.path.join (ROOT_DIR, original_path[1:])
+                if os.path.exists (path_on_fs):
+                    logging.warning ("Removing [%s]" % path_on_fs)
+                    if os.path.isdir (path_on_fs):
+                        logging.warning ("==> shutil.rmtree (path_on_fs)")
+                        rmtree_safe (path_on_fs)
+                    else:
+                        logging.warning ("==> os.path.unlink (path_on_fs)")
+                        unlink_safe (path_on_fs)
+                    DBD_CLIENT.del_file_entry (i_path)
             continue
 
         path = metadata.get ("path", i_path) # to get case-sensitive path if possible
         path_on_fs = os.path.join (ROOT_DIR, path[1:])
-        logging.info ("Processing element %s", path)
-        logging.debug ("Path on FS: %s", path_on_fs)
+        logging.info ("Processing element [%s]" % path)
+        logging.debug ("Path on FS: [%s]" % path_on_fs)
 
         if metadata.get ("is_dir"):
             # This is a directory, we should create if it
             # doesn't exist (and then apply metadata to it?)
             if os.path.exists (path_on_fs) and not os.path.isdir (path_on_fs):
                 # Remove the file
-                logging.warning ("Unlink %s" % path_on_fs)
+                logging.warning ("Unlink [%s]" % path_on_fs)
                 logging.warning ("os.unlink (path_on_fs)")
                 unlink_safe (path_on_fs)
+                DBD_CLIENT.del_file_entry (i_path)
 
             if not os.path.isdir (path_on_fs):
                 # Create the directory
                 os.makedirs (path_on_fs)
+                DBD_CLIENT.put_file_entry (i_path, metadata)
         else:
             # This is a file.
             if os.path.exists (path_on_fs) and not os.path.isfile (path_on_fs):
                 # Remove existing element if it's not a file
-                logging.warning ("Removing %s" % path_on_fs)
+                logging.warning ("Removing [%s]" % path_on_fs)
                 logging.warning ("==> shutil.rmtree (path_on_fs)")
                 rmtree_safe (path_on_fs)
+                DBD_CLIENT.del_file_entry (i_path)
+
+            # Create parent dir if required
             if not os.path.exists (os.path.dirname (path_on_fs)):
                 # Create folder tree if required
                 os.makedirs (os.path.dirname (path_on_fs))
+                DBD_CLIENT.put_file_entry (i_path, metadata)
 
             # Fetch and save file
             fetch_and_save_file (element)
 
 def main ():
+    # Initialize
     setup_argparse ()
     initialize ()
 
-    # Fetch new entries
+    # Fetch new entries & files
     delta = get_delta ()
     act_on_delta (delta)
 
     # Save cursor status for next time
-    CONFIG["CURSOR"] = delta["cursor"]
-    save_config (ROOT_DIR)
+    DBD_CLIENT.put_cursor (delta["cursor"])
 
 if __name__ == "__main__":
     try:
