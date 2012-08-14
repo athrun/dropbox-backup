@@ -9,7 +9,7 @@ the official dropbox client, like NAS systems using PPC CPUs.
 How to use
 ===========
 
-    usage: dl_dropbox.py [-h] folder
+    usage: dropbox_backup.py [-h] folder
 
     This tool will backup the content of an user's dropbox to a specified local
     directory.
