@@ -178,11 +178,13 @@ def reset_root_dir ():
         the config file.
     """
     if os.path.isdir (ROOT_DIR):
+        whitelist = [CONFIG_FILE, DBD_CLIENT.STATUS_FILE_NAME]
         print "Removing content of [%s] - Yes/No?" % ROOT_DIR
         r = raw_input ("=> ")
         if r.lower () == 'yes':
+            DBD_CLIENT.reset_db ()
             for element in os.listdir (ROOT_DIR):
-                if element == CONFIG_FILE:
+                if element in whitelist:
                     continue
                 path = os.path.join (ROOT_DIR, element)
                 if os.path.isdir (path):
