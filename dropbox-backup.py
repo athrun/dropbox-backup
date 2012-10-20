@@ -7,7 +7,7 @@ __version__ = "$Revision: 1.0 $"
 # Include the Dropbox SDK libraries
 from dropbox import client, rest, session
 from dbclient import SyncStatusDB
-import sys, os, shutil, urlparse, urllib
+import sys, os, shutil, urllib
 import argparse
 import logging
 import subprocess
@@ -80,9 +80,8 @@ def handle_oauth (sess):
         # This will fail if the user didn't visit
         # the above URL and hit 'Allow'
         access_token = sess.obtain_access_token(request_token)
-        tokens = urlparse.parse_qs (access_token)
-        for key in tokens.items ():
-            CONFIG[key.upper()] = tokens[key]
+        CONFIG["OAUTH_TOKEN"] = access_token.key
+        CONFIG["OAUTH_TOKEN_SECRET"] = access_token.secret
         save_config (ROOT_DIR)
     else:
         sess.set_token (CONFIG["OAUTH_TOKEN"], CONFIG["OAUTH_TOKEN_SECRET"])
